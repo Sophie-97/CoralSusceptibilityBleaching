@@ -93,6 +93,7 @@ Plots of diversity hotspots per order, i.e. species richness for the different o
 #  return(new_list)
 # }
 
+<<<<<<< HEAD
 # sea_coords <- function(list_clean){
 #   new_list <- list()
 #   v <- vector()
@@ -121,6 +122,36 @@ Plots of diversity hotspots per order, i.e. species richness for the different o
 # 
 # clean_coords_list <- list()
 # clean_coords_list <- sea_coords(cleaned_list)
+=======
+sea_coords <- function(list_clean){
+  new_list <- list()
+  v <- vector()
+  coords_land <- data.frame()
+  list_to_df <- data.frame()
+  combined_df <- data.frame()
+  a <- 1
+  b <- 1
+  for (l in 1:length(list_clean)) {
+    coords_land <- clean_coordinates(data.frame(list_clean[[l]]), lon = "decimalLongitude", lat = "decimalLatitude", species = "species", tests = c("seas"), value="clean")
+    list_to_df <- data.frame(list_clean[[l]])
+    a <- nrow(list_to_df)
+    combined_df <- rbind(list_to_df, coords_land)
+    b <- nrow(combined_df)
+    v <- duplicated(combined_df, fromLast = TRUE)
+      for (t in rev(v)) {
+        if (t == TRUE) {
+          combined_df[b,1:4] <- NA
+        } 
+        b=b-1;
+      }
+    new_list[[l]] <- list(na.omit(combined_df[1:b,1:4]))
+  }
+ return(new_list)
+}
+
+clean_coords_list <- list()
+clean_coords_list <- sea_coords(cleaned_list)
+>>>>>>> 433a06a49059bd169221f826b8fa78099d3a3bc0
 
 
 # cleaned_coords_list <- function(df) {
@@ -135,14 +166,24 @@ Plots of diversity hotspots per order, i.e. species richness for the different o
 # # cleaned_coordinates <- cleaned_coords(cleaned_list)
 # filtered_coords <- lapply(cleaned_list, FUN= cleaned_coords)
 
+<<<<<<< HEAD
 # new_order_list <- list()
 # new_order_list <- cleaned_coords_list(cleaned_list)
 # new_order_list <- lapply(cleaned_list, FUN = cleaned_coords_list)
+=======
+new_order_list <- list()
+#new_order_list <- cleaned_coords_list(cleaned_list)
+new_order_list <- lapply(cleaned_list, FUN = cleaned_coords_list)
+>>>>>>> 433a06a49059bd169221f826b8fa78099d3a3bc0
 
 raster_coral <- function(list_clean){
   for (l in 1:length(list_clean)) {
     corpoints <- st_as_sf(data.frame(list_clean[[l]]), coords = c(x="decimalLongitude", y="decimalLatitude"))
+<<<<<<< HEAD
      r <- raster(corpoints, res = 1.5)
+=======
+     r <- raster(corpoints, res = 0.8)
+>>>>>>> 433a06a49059bd169221f826b8fa78099d3a3bc0
      r <- rasterize(corpoints, r, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
       pdf(paste0(l,".pdf"))
      map("world")
@@ -158,6 +199,7 @@ Mapping hotspots of all orders on one map
 
 ```{r Hotspot map of all coral species}
 
+<<<<<<< HEAD
 combine_all_coords <- function(list_all_orders) {
   c <-1
   coords_list <- list()
@@ -187,6 +229,8 @@ r_all <- rasterize(df_all_coords, r_all, field = "speciesKey", fun= function(x, 
 map("world")
 plot(r_all, add=TRUE)
 
+=======
+>>>>>>> 433a06a49059bd169221f826b8fa78099d3a3bc0
 ```
 
 Coral bleaching susceptibility vs resistance
@@ -198,6 +242,7 @@ The data has been downloaded from the supplementary material provided by Swain e
 BRI_data <- fread("BRI_taxon_Swain2016.csv", select = c("Taxon", "Taxon-BRI (Bleaching Response Index) (%)", "Number of records", "Std Deviation"))
 
 clean_BRI_data <- filter(BRI_data, BRI_data$`Number of records` != "1" & BRI_data$`Std Deviation` != "") # remove records where standard deviation is zero and those where the number of records is only one
+<<<<<<< HEAD
 
 # filter out genus (character length = 1)
 species_only <- function(taxa) {
@@ -236,5 +281,7 @@ Function that finds susceptible/resistant species in GBIF data set.
 
 cleaned_df <- list_to_df(cleaned_list); 
 susc_species <- susc_species[cleaned_df$species %in% susceptible_corals$Taxon, ]; 
+=======
+>>>>>>> 433a06a49059bd169221f826b8fa78099d3a3bc0
 ```
 
