@@ -1,0 +1,240 @@
+---
+title: "BEES3041_CoralDiversity_Bleaching"
+author: "Sophie"
+date: "7/19/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The class "Anthozoa" has more than 1.5 million data entries. It comprises 11 orders, namely "Actiniaria", "Alcyonacea", "Antipatharia", "Corallimorpharia", "Heliolitina", "Helioporarea", "Penicillaria", "Pennatulacea", "Scleractinia", "Spirularia" & "Zoantharia". However, not all of these orders are tropical corals.
+Specifically, "Actiniaria", "Penicillaria" and "Spirularia" are sea anemones, "Pennatulacea" are sea pens, "Antipatharia" are deep sea corals and "Heliolitina"are fossils. Hence, all these 6 orders are neglected for this project. Only the following orders are considered: 
+[1]  Alcyonacea: the soft corals
+[2]  Corallimorpharia: tropical corals, closely related to Scleractinia
+[3]  Helioporacea: colonial, stony corals
+[4]  Scleractinia: stony corals & gorgonians
+[5]  Zoantharia
+The data from the above named orders is downloaded indivdially from gbif.org and saved on to the computer.
+
+```{r Load libraries}
+library(data.table)
+library(sf)
+library(fasterize)
+library(dplyr)
+library(maps)
+library(maptools)
+library(sp)
+library(raster)
+library(leaflet) # not sure if needed -> colorbar?
+library(CoordinateCleaner)
+```
+
+The data that has been successfully saved on to the computer is now loaded into r studio.
+
+```{r Load data}
+
+coral_list <- list.files(pattern="order.*csv")
+
+load_data <- function(list_data) {
+   coral_data_list<-list()
+   e<-1
+   for (l in list_data) {
+     coral_data_list[[e]] <- fread(l, select = c("species","decimalLongitude", "decimalLatitude", "speciesKey"))
+     e=e+1
+   }
+   return(coral_data_list)
+ }
+ 
+coral_data <- load_data(coral_list)
+
+```
+
+In the different datasets, some records do not contain the coordinates whilst others lack the identification to species level. Since those records that lack the information about species ID and location are meaningless for the purpose of this project, this next step involves the removal of N.A.s in coordinates ("decimalLongitude" & "decimalLatitude") and "speciesKey".
+
+Note: if longitude is missing, latitude is missing as well. Hence, no need to check for N.A.s in decimalLatitude
+
+```{r Data cleaning}
+ 
+ clean_data <- function(df) {
+     filt_data <- filter(df,!is.na(decimalLongitude)&!is.na(speciesKey)) %>%
+     list();
+   } 
+
+cleaned_list <- lapply(coral_data,FUN=clean_data)
+```
+
+Plots of diversity hotspots per order, i.e. species richness for the different orders
+
+```{r Raster & Mapping}
+
+# cleaned_coords <- function(df) {
+#   corpoints_land <- clean_coordinates(df, lon= "decimalLongitude", lat= "decimalLatitude", species= "species", tests = "seas", value = "clean")
+#   new_coords <- filter(df, !corpoints_land) %>%
+#   list();
+# }
+  
+# cleaned_coords_list <- function(list_clean){
+#   e<-1
+#   new_list <- list()
+#   # for (l in 1:length(list_clean)) {
+#   for (l in list_clean) {
+#    # corpoints_land <- clean_coordinates(data.frame(list_clean[[l]]), lon = "decimalLongitude", lat = "decimalLatitude", species = "species", tests = c("seas"), value="clean")
+#    # list_to_df <- data.frame(list_clean[[l]])
+#     corpoints_land <- clean_coordinates(data.frame(list_clean[[e]]), lon = "decimalLongitude", lat = "decimalLatitude", species = "species", tests = c("seas"), value="clean")
+#     list_to_df <- data.frame(list_clean[[e]])
+#     combined_df <- rbind(list_to_df, corpoints_land)
+#     # new_df <- unique(combined_df) %>%
+#     new_list[[e]] <- list(unique(combined_df, by= c("decimalLongitude", "decimalLatitude")))
+#     # list();
+#     e=e+1
+#   }
+#  return(new_list)
+# }
+
+# sea_coords <- function(list_clean){
+#   new_list <- list()
+#   v <- vector()
+#   coords_land <- data.frame()
+#   list_to_df <- data.frame()
+#   combined_df <- data.frame()
+#   a <- 1
+#   b <- 1
+#   for (l in 1:length(list_clean)) {
+#     coords_land <- clean_coordinates(data.frame(list_clean[[l]]), lon = "decimalLongitude", lat = "decimalLatitude", species = "species", tests = c("seas"), value="clean")
+#     list_to_df <- data.frame(list_clean[[l]])
+#     a <- nrow(list_to_df)
+#     combined_df <- rbind(list_to_df, coords_land)
+#     b <- nrow(combined_df)
+#     v <- duplicated(combined_df, fromLast = TRUE)
+#       for (t in rev(v)) {
+#         if (t == TRUE) {
+#           combined_df[b,1:4] <- NA
+#         } 
+#         b=b-1;
+#       }
+#     new_list[[l]] <- list(na.omit(combined_df[1:b,1:4]))
+#   }
+#  return(new_list)
+# }
+# 
+# clean_coords_list <- list()
+# clean_coords_list <- sea_coords(cleaned_list)
+
+
+# cleaned_coords_list <- function(df) {
+#   corpoints_land <- clean_coordinates(df[[]], lon = "decimalLongitude", lat = "decimalLatitude", species = "species", tests = c("seas"), value="clean")
+#   print(corpoints_land)
+#   # combined_df <- rbind(df, corpoints_land)
+#   # new_coords <- unique(combined_df) %>%
+#   # list();
+# }
+# 
+# cleaned_coordinates_list <- lapply(cleaned_list, FUN = cleaned_coords_list)
+# # cleaned_coordinates <- cleaned_coords(cleaned_list)
+# filtered_coords <- lapply(cleaned_list, FUN= cleaned_coords)
+
+# new_order_list <- list()
+# new_order_list <- cleaned_coords_list(cleaned_list)
+# new_order_list <- lapply(cleaned_list, FUN = cleaned_coords_list)
+
+raster_coral <- function(list_clean){
+  for (l in 1:length(list_clean)) {
+    corpoints <- st_as_sf(data.frame(list_clean[[l]]), coords = c(x="decimalLongitude", y="decimalLatitude"))
+     r <- raster(corpoints, res = 1.5)
+     r <- rasterize(corpoints, r, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
+      pdf(paste0(l,".pdf"))
+     map("world")
+     plot(r,add= TRUE)  # adds the worldmap to the raster on the same plot
+     dev.off()      
+   }
+}
+
+ raster_coral(cleaned_list)
+```
+
+Mapping hotspots of all orders on one map
+
+```{r Hotspot map of all coral species}
+
+combine_all_coords <- function(list_all_orders) {
+  c <-1
+  coords_list <- list()
+    for (l in 1:length(list_all_orders)){
+       coords_list[[c]] <- st_as_sf((data.frame(list_all_orders[[l]])), coords = c(x="decimalLongitude", y="decimalLatitude"))
+       c = c+1
+    }  
+  return(coords_list)
+}
+
+coords_all_sp <- list();
+coords_all_sp <- combine_all_coords(cleaned_list);
+
+list_to_df <- function(list_all_coords) {
+  comb_df <- data.frame()
+   for (l in 1:length(list_all_coords)) {
+     comb_df <- rbind(comb_df,data.frame(list_all_coords[[l]]))
+   }
+  return(comb_df)
+}
+
+df_all_coords <- data.frame();
+df_all_coords <- list_to_df(coords_all_sp);
+
+r_all <- raster(df_all_coords, res= 1.5)
+r_all <- rasterize(df_all_coords, r_all, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
+map("world")
+plot(r_all, add=TRUE)
+
+```
+
+Coral bleaching susceptibility vs resistance
+
+Different species of corals have different levels of tolerance with respect to fluctuating temperatures. Swain et al. (2016) have defined and standardized this variability in the form of a "Bleaching Response Index" (BRI). In total, they have defined BRIs for 
+
+The data has been downloaded from the supplementary material provided by Swain et al. (2016). 
+```{r BRI data}
+BRI_data <- fread("BRI_taxon_Swain2016.csv", select = c("Taxon", "Taxon-BRI (Bleaching Response Index) (%)", "Number of records", "Std Deviation"))
+
+clean_BRI_data <- filter(BRI_data, BRI_data$`Number of records` != "1" & BRI_data$`Std Deviation` != "") # remove records where standard deviation is zero and those where the number of records is only one
+
+# filter out genus (character length = 1)
+species_only <- function(taxa) {
+  split_taxa <- list()
+  length_taxa <- integer()
+  for (i in 1:length(taxa)) {
+    split_taxa <- strsplit(taxa[i]," ")
+    length_taxa <- length(split_taxa[[1]])
+      if (length_taxa == 1) {
+        taxa[i] <- NA
+      }
+  }
+  return(taxa)
+}
+
+clean_BRI_data$Taxon <- species_only(clean_BRI_data$Taxon);
+clean_BRI_data <- na.omit(clean_BRI_data)
+```
+
+Standardized taxon-specifc Bleaching Response Index (BRIj) defined by Swain et al. (2016):
+- Highly susceptible corals have a BRIj above 40%
+- Highly resistant corals have a BRIj below 10%
+
+```{r}
+susceptible_corals <- clean_BRI_data %>% filter(`Taxon-BRI (Bleaching Response Index) (%)` > 40);
+resistant_corals <- clean_BRI_data %>% filter(`Taxon-BRI (Bleaching Response Index) (%)` < 10);
+
+```
+
+Function that finds susceptible/resistant species in GBIF data set.
+
+```{r}
+# table(Y$List1)
+# Y <- Y[Y$List1 %in% X$List1,]
+# table(Y$List1)
+
+cleaned_df <- list_to_df(cleaned_list); 
+susc_species <- susc_species[cleaned_df$species %in% susceptible_corals$Taxon, ]; 
+```
+
