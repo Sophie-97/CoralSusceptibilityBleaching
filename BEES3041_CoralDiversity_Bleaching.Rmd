@@ -29,6 +29,10 @@ library(sp)
 library(raster)
 library(leaflet) # not sure if needed -> colorbar?
 library(CoordinateCleaner)
+library(rnaturalearth)
+library(tidyverse)
+library(ncdf4)
+library(ggplot2)
 ```
 
 The data that has been successfully saved on to the computer is now loaded into r studio.
@@ -37,10 +41,10 @@ The data that has been successfully saved on to the computer is now loaded into 
 
 coral_list <- list.files(pattern="order.*csv")
 
-load_data <- function(list_data) {
+load_data <- function(data_list) {
    coral_data_list<-list()
    e<-1
-   for (l in list_data) {
+   for (l in data_list) {
      coral_data_list[[e]] <- fread(l, select = c("species","decimalLongitude", "decimalLatitude", "speciesKey"))
      e=e+1
    }
@@ -65,141 +69,55 @@ Note: if longitude is missing, latitude is missing as well. Hence, no need to ch
 cleaned_list <- lapply(coral_data,FUN=clean_data)
 ```
 
+Dataframes are often more easy to handle compared to lists. Therefore, the following function transforms lists into one big dataframe.
+
+```{r}
+list_to_df <- function(data_list) {
+  comb_df <- data_list[[1]]
+   for (l in 2:length(data_list)) {
+     comb_df <- bind_rows(comb_df,data.frame(data_list[[l]]))
+   }
+  return(comb_df)
+}
+```
+
 Plots of diversity hotspots per order, i.e. species richness for the different orders
 
 ```{r Raster & Mapping}
 
-# cleaned_coords <- function(df) {
-#   corpoints_land <- clean_coordinates(df, lon= "decimalLongitude", lat= "decimalLatitude", species= "species", tests = "seas", value = "clean")
-#   new_coords <- filter(df, !corpoints_land) %>%
-#   list();
-# }
-  
-# cleaned_coords_list <- function(list_clean){
-#   e<-1
-#   new_list <- list()
-#   # for (l in 1:length(list_clean)) {
-#   for (l in list_clean) {
-#    # corpoints_land <- clean_coordinates(data.frame(list_clean[[l]]), lon = "decimalLongitude", lat = "decimalLatitude", species = "species", tests = c("seas"), value="clean")
-#    # list_to_df <- data.frame(list_clean[[l]])
-#     corpoints_land <- clean_coordinates(data.frame(list_clean[[e]]), lon = "decimalLongitude", lat = "decimalLatitude", species = "species", tests = c("seas"), value="clean")
-#     list_to_df <- data.frame(list_clean[[e]])
-#     combined_df <- rbind(list_to_df, corpoints_land)
-#     # new_df <- unique(combined_df) %>%
-#     new_list[[e]] <- list(unique(combined_df, by= c("decimalLongitude", "decimalLatitude")))
-#     # list();
-#     e=e+1
-#   }
-#  return(new_list)
-# }
+cleaned_df <- list_to_df(cleaned_list);
 
-<<<<<<< HEAD
-# sea_coords <- function(list_clean){
-#   new_list <- list()
-#   v <- vector()
-#   coords_land <- data.frame()
-#   list_to_df <- data.frame()
-#   combined_df <- data.frame()
-#   a <- 1
-#   b <- 1
-#   for (l in 1:length(list_clean)) {
-#     coords_land <- clean_coordinates(data.frame(list_clean[[l]]), lon = "decimalLongitude", lat = "decimalLatitude", species = "species", tests = c("seas"), value="clean")
-#     list_to_df <- data.frame(list_clean[[l]])
-#     a <- nrow(list_to_df)
-#     combined_df <- rbind(list_to_df, coords_land)
-#     b <- nrow(combined_df)
-#     v <- duplicated(combined_df, fromLast = TRUE)
-#       for (t in rev(v)) {
-#         if (t == TRUE) {
-#           combined_df[b,1:4] <- NA
-#         } 
-#         b=b-1;
-#       }
-#     new_list[[l]] <- list(na.omit(combined_df[1:b,1:4]))
-#   }
-#  return(new_list)
-# }
-# 
-# clean_coords_list <- list()
-# clean_coords_list <- sea_coords(cleaned_list)
-=======
-sea_coords <- function(list_clean){
-  new_list <- list()
-  v <- vector()
-  coords_land <- data.frame()
-  list_to_df <- data.frame()
-  combined_df <- data.frame()
-  a <- 1
-  b <- 1
-  for (l in 1:length(list_clean)) {
-    coords_land <- clean_coordinates(data.frame(list_clean[[l]]), lon = "decimalLongitude", lat = "decimalLatitude", species = "species", tests = c("seas"), value="clean")
-    list_to_df <- data.frame(list_clean[[l]])
-    a <- nrow(list_to_df)
-    combined_df <- rbind(list_to_df, coords_land)
-    b <- nrow(combined_df)
-    v <- duplicated(combined_df, fromLast = TRUE)
-      for (t in rev(v)) {
-        if (t == TRUE) {
-          combined_df[b,1:4] <- NA
-        } 
-        b=b-1;
-      }
-    new_list[[l]] <- list(na.omit(combined_df[1:b,1:4]))
-  }
- return(new_list)
+sea_coords <- function(df){
+  coords_land <- clean_coordinates(df, lon = "decimalLongitude", lat = "decimalLatitude", species = "species", tests = c("seas"), value="clean")
+  df_compared <- ((df$decimalLongitude %in% coords_land$decimalLongitude) & (df$decimalLatitude%in% coords_land$decimalLatitude) & (df$species %in% coords_land$species))
+  new_coordinates <- filter(cleaned_df, !df_compared);
 }
 
-clean_coords_list <- list()
-clean_coords_list <- sea_coords(cleaned_list)
->>>>>>> 433a06a49059bd169221f826b8fa78099d3a3bc0
+cleaned_coordinates <- sea_coords(cleaned_df);
 
 
-# cleaned_coords_list <- function(df) {
-#   corpoints_land <- clean_coordinates(df[[]], lon = "decimalLongitude", lat = "decimalLatitude", species = "species", tests = c("seas"), value="clean")
-#   print(corpoints_land)
-#   # combined_df <- rbind(df, corpoints_land)
-#   # new_coords <- unique(combined_df) %>%
-#   # list();
-# }
-# 
-# cleaned_coordinates_list <- lapply(cleaned_list, FUN = cleaned_coords_list)
-# # cleaned_coordinates <- cleaned_coords(cleaned_list)
-# filtered_coords <- lapply(cleaned_list, FUN= cleaned_coords)
-
-<<<<<<< HEAD
-# new_order_list <- list()
-# new_order_list <- cleaned_coords_list(cleaned_list)
-# new_order_list <- lapply(cleaned_list, FUN = cleaned_coords_list)
-=======
-new_order_list <- list()
-#new_order_list <- cleaned_coords_list(cleaned_list)
-new_order_list <- lapply(cleaned_list, FUN = cleaned_coords_list)
->>>>>>> 433a06a49059bd169221f826b8fa78099d3a3bc0
-
-raster_coral <- function(list_clean){
+map_coral <- function(list_clean){
   for (l in 1:length(list_clean)) {
     corpoints <- st_as_sf(data.frame(list_clean[[l]]), coords = c(x="decimalLongitude", y="decimalLatitude"))
-<<<<<<< HEAD
-     r <- raster(corpoints, res = 1.5)
-=======
      r <- raster(corpoints, res = 0.8)
->>>>>>> 433a06a49059bd169221f826b8fa78099d3a3bc0
      r <- rasterize(corpoints, r, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
-      pdf(paste0(l,".pdf"))
-     map("world")
-     plot(r,add= TRUE)  # adds the worldmap to the raster on the same plot
-     dev.off()      
+      #pdf(paste0(l,".pdf"))
+     #as_mapper(c("world"))
+     #map("world")
+     plot(r)  # adds the worldmap to the raster on the same plot , add= TRUE
+     #dev.off()
    }
 }
 
- raster_coral(cleaned_list)
+map_coral(cleaned_list);
+
+
 ```
 
 Mapping hotspots of all orders on one map
 
 ```{r Hotspot map of all coral species}
 
-<<<<<<< HEAD
 combine_all_coords <- function(list_all_orders) {
   c <-1
   coords_list <- list()
@@ -213,24 +131,19 @@ combine_all_coords <- function(list_all_orders) {
 coords_all_sp <- list();
 coords_all_sp <- combine_all_coords(cleaned_list);
 
-list_to_df <- function(list_all_coords) {
-  comb_df <- data.frame()
-   for (l in 1:length(list_all_coords)) {
-     comb_df <- rbind(comb_df,data.frame(list_all_coords[[l]]))
-   }
-  return(comb_df)
-}
+df_all_coords <- coords_all_sp[[1]]
+df_all_coords <- do.call('rbind',coords_all_sp);
 
-df_all_coords <- data.frame();
-df_all_coords <- list_to_df(coords_all_sp);
 
-r_all <- raster(df_all_coords, res= 1.5)
+r_all <- raster(coords_all_sp[[1]], res= 1.5)
 r_all <- rasterize(df_all_coords, r_all, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
-map("world")
-plot(r_all, add=TRUE)
 
-=======
->>>>>>> 433a06a49059bd169221f826b8fa78099d3a3bc0
+r2<-r_all>100
+pts<-data.frame(rasterToPoints(r_all,fun=function(x){x>100}))
+
+world<-ne_countries(scale="medium",returnclass="sf")
+ggplot(data=world)+geom_sf()+geom_point(data=pts,aes(x=x,y=y,color=layer))+scale_colour_gradientn(colours = c("#FFCCCC", "#FF9999","#FF6666","#CC3333", "#990000", "#660000"))
+
 ```
 
 Coral bleaching susceptibility vs resistance
@@ -241,8 +154,12 @@ The data has been downloaded from the supplementary material provided by Swain e
 ```{r BRI data}
 BRI_data <- fread("BRI_taxon_Swain2016.csv", select = c("Taxon", "Taxon-BRI (Bleaching Response Index) (%)", "Number of records", "Std Deviation"))
 
+BRI_data$`Taxon-BRI (Bleaching Response Index) (%)`<-as.numeric(gsub(",",".",BRI_data$`Taxon-BRI (Bleaching Response Index) (%)`))
+
+BRI_data$`Std Deviation`<-as.numeric(gsub(",",".",BRI_data$`Std Deviation`))
+
 clean_BRI_data <- filter(BRI_data, BRI_data$`Number of records` != "1" & BRI_data$`Std Deviation` != "") # remove records where standard deviation is zero and those where the number of records is only one
-<<<<<<< HEAD
+
 
 # filter out genus (character length = 1)
 species_only <- function(taxa) {
@@ -269,19 +186,86 @@ Standardized taxon-specifc Bleaching Response Index (BRIj) defined by Swain et a
 ```{r}
 susceptible_corals <- clean_BRI_data %>% filter(`Taxon-BRI (Bleaching Response Index) (%)` > 40);
 resistant_corals <- clean_BRI_data %>% filter(`Taxon-BRI (Bleaching Response Index) (%)` < 10);
-
 ```
 
 Function that finds susceptible/resistant species in GBIF data set.
 
 ```{r}
-# table(Y$List1)
-# Y <- Y[Y$List1 %in% X$List1,]
-# table(Y$List1)
 
-cleaned_df <- list_to_df(cleaned_list); 
-susc_species <- susc_species[cleaned_df$species %in% susceptible_corals$Taxon, ]; 
-=======
->>>>>>> 433a06a49059bd169221f826b8fa78099d3a3bc0
+# GBIF_susc <- filter(cleaned_df,cleaned_df$species %in% susceptible_corals$Taxon);
+# GBIF_res <- filter(cleaned_df,cleaned_df$species %in% resistant_corals$Taxon);
+GBIF_susc <- filter(df_all_coords, df_all_coords$species %in% susceptible_corals$Taxon);
+GBIF_res <- filter(df_all_coords, df_all_coords$species %in% resistant_corals$Taxon);
+
+# Susceptible species
+
+# world_map <- map_data("world")
+# ggplot(world_map, aes(x = long, y = lat, group = group)) +
+#   geom_polygon(fill="lightgray", colour = "white") + geom_point(data = GBIF_susc, aes(x= GBIF_susc$decimalLongitude, y= GBIF_susc$decimalLatitude, group = NULL))
+# 
+# r_susc<- raster(GBIF_susc, res= 1.5)
+# r_susc<- rasterize(GBIF_susc, r_susc, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
+# 
+# pts_susc<-data.frame(rasterToPoints(r_susc,fun=function(x){x==28887}))
+# 
+# world<-ne_countries(scale="medium",returnclass="sf")
+# ggplot(data=world)+geom_sf()+geom_point(data=pts_susc,aes(x=x,y=y,color="blue"))
+
+### Plot of coral susceptibility
+extent(r_all) <- extent(r_susc); # needed to get same resolution!!
+r_susc <- raster(GBIF_susc[[1]], res= 1.5)
+r_susc <- rasterize(GBIF_susc, r_susc, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
+pts_susc<-data.frame(rasterToPoints(r_susc,fun=function(x){x>10}))
+r2<-r_all>100
+world<-ne_countries(scale="medium",returnclass="sf")
+ggplot(data=world)+geom_sf()+geom_point(data=pts_susc,aes(x=x,y=y,color=layer))+scale_colour_gradientn(colours = c("#FFCCCC", "#FF9999","#FF6666","#CC3333", "#990000", "#660000"))
+
+```
+Plot RELATIVE coral susceptibility
+
+```{r}
+
+relativate <- function(raster_resilience, raster_abundance) {
+  rel_resil <- integer();
+  r_rel <- raster();
+  for (i in 1:ncol(raster_resilience)){
+   for (j in 1:nrow(raster_resilience)) {
+     rel_resil <- round(raster_resilience$layer/raster_abundance$layer)
+     r_rel[i,j] <- rel_resil
+   }
+  }
+  return(r_rel)
+}
+
+relative_susc <- relativate(r_susc, r_all);
+
+r_rel_susc <- merge(r_all, r_susc, tolerance= 1.0, overlap= TRUE)
+pts_rel_susc <- data.frame(rasterToPoints(r_rel_susc,fun=function(x){x>100}))
+
+world<-ne_countries(scale="medium",returnclass="sf")
+ggplot(data=world)+geom_sf()+geom_point(data=pts_rel_susc,aes(x=x,y=y,color=layer))+scale_colour_gradientn(colours = c("#FFCCCC", "#FF9999","#FF6666","#CC3333", "#990000", "#660000"))
+
+r_tot_div <- raster(df_all_coords, res = 1.0)
+r_tot_div <- rasterize(df_all_coords, r_tot_div, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
+plot(r_tot_div)
+
+```
+
+xy
+```{r}
+plot(r_tot_div > 200)
+plot(r_susc > 25)
+```
+```{r}
+cor_div <- raster(coords_all_sp[[1]], res= 1.5)
+cor_div <- rasterize(df_all_coords, cor_div, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
+pts_cor_div <-data.frame(rasterToPoints(cor_div,fun=function(x){x>300}))
+
+r_high_susc <- raster(GBIF_susc[1], res= 1.5)
+r_high_susc <- rasterize(GBIF_susc, r_high_susc, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
+pts_high_susc<-data.frame(rasterToPoints(r_high_susc,fun=function(x){x>25}))
+
+world<-ne_countries(scale="medium",returnclass="sf")
+ggplot(data=world)+geom_sf()+geom_point(data=pts_cor_div,aes(x=x,y=y,color=layer))+scale_colour_gradientn(colours = c("#FFCCCC", "#FF9999","#FF6666","#CC3333", "#990000", "#660000")) + geom_point(data= pts_high_susc, aes(x=x,y=y, color=layer))
 ```
 
