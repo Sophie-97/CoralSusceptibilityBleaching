@@ -35,7 +35,7 @@ library(ncdf4)
 library(ggplot2)
 ```
 
-The data that has been successfully saved on to the computer is now loaded into r studio.
+The data that has been successfully saved on to the computer (in form of .csv files) is now loaded into r studio.
 
 ```{r Load data}
 
@@ -88,12 +88,21 @@ Plots of diversity hotspots per order, i.e. species richness for the different o
 cleaned_df <- list_to_df(cleaned_list);
 
 sea_coords <- function(df){
-  coords_land <- clean_coordinates(df, lon = "decimalLongitude", lat = "decimalLatitude", species = "species", tests = c("seas"), value="clean")
-  df_compared <- ((df$decimalLongitude %in% coords_land$decimalLongitude) & (df$decimalLatitude%in% coords_land$decimalLatitude) & (df$species %in% coords_land$species))
-  new_coordinates <- filter(cleaned_df, !df_compared);
+  coords_land <- clean_coordinates(df, lon = "decimalLongitude", lat = "decimalLatitude", species = "species", tests = c("seas"), value="spatialvalid")
+  #df_compared <- ((df$decimalLongitude %in% coords_land$decimalLongitude) & (df$decimalLatitude%in% coords_land$decimalLatitude) & (df$species %in% coords_land$species))
+  #ggplot(coords_land,aes(x=decimalLongitude,y=decimalLatitude,col=.sea))+geom_point()
+  new_coordinates<-filter(coords_land,.sea==FALSE)
+  
+  filter(cleaned_df, !df_compared) %>%
+    select(species,decimalLongitude,decimalLatitude)
 }
 
 cleaned_coordinates <- sea_coords(cleaned_df);
+
+super_cleaned_list<-list()
+for(i in 1:length(cleaned_list)){
+  super_cleaned_list[[i]]<-sea_coords(data.frame(cleaned_list[[i]]))
+}
 
 
 map_coral <- function(list_clean){
@@ -103,13 +112,13 @@ map_coral <- function(list_clean){
      r <- rasterize(corpoints, r, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
       #pdf(paste0(l,".pdf"))
      #as_mapper(c("world"))
-     #map("world")
-     plot(r)  # adds the worldmap to the raster on the same plot , add= TRUE
+     maps::map("world")
+     plot(r,add=TRUE)  # adds the worldmap to the raster on the same plot , add= TRUE
      #dev.off()
    }
 }
 
-map_coral(cleaned_list);
+map_coral(super_cleaned_list);
 
 
 ```
@@ -129,14 +138,16 @@ combine_all_coords <- function(list_all_orders) {
 }
 
 coords_all_sp <- list();
-coords_all_sp <- combine_all_coords(cleaned_list);
+coords_all_sp <- combine_all_coords(super_cleaned_list);
 
 df_all_coords <- coords_all_sp[[1]]
 df_all_coords <- do.call('rbind',coords_all_sp);
 
 
 r_all <- raster(coords_all_sp[[1]], res= 1.5)
-r_all <- rasterize(df_all_coords, r_all, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
+r_all <- rasterize(df_all_coords, r_all, field = "species", fun= function(x, ...) {length(unique(na.omit(x)))})
+maps::map("world")
+plot(r_all,add=TRUE)
 
 r2<-r_all>100
 pts<-data.frame(rasterToPoints(r_all,fun=function(x){x>100}))
@@ -212,9 +223,15 @@ GBIF_res <- filter(df_all_coords, df_all_coords$species %in% resistant_corals$Ta
 # ggplot(data=world)+geom_sf()+geom_point(data=pts_susc,aes(x=x,y=y,color="blue"))
 
 ### Plot of coral susceptibility
-extent(r_all) <- extent(r_susc); # needed to get same resolution!!
-r_susc <- raster(GBIF_susc[[1]], res= 1.5)
-r_susc <- rasterize(GBIF_susc, r_susc, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
+#extent(r_all) <- extent(r_susc); # needed to get same resolution!!
+r_susc <- r_all
+reset_vector <- integer(length(ncell(r_susc)));
+r_susc <- setValues(r_susc,reset_vector);
+r_susc <- rasterize(GBIF_susc, r_susc, field = "species", fun= function(x, ...) {length(unique(na.omit(x)))})
+
+r_susc_count <- rasterize(GBIF_susc, r_susc, field = "species", fun= function(x, ...) {length(na.omit(x))})
+
+
 pts_susc<-data.frame(rasterToPoints(r_susc,fun=function(x){x>10}))
 r2<-r_all>100
 world<-ne_countries(scale="medium",returnclass="sf")
@@ -224,14 +241,38 @@ ggplot(data=world)+geom_sf()+geom_point(data=pts_susc,aes(x=x,y=y,color=layer))+
 Plot RELATIVE coral susceptibility
 
 ```{r}
+r_all_new<-r_all>10
+r_all_newer<-r_all*r_all_new
 
-relativate <- function(raster_resilience, raster_abundance) {
-  rel_resil <- integer();
+r_all_newer<-setValues(r_all_newer,ifelse(getValues(r_all)>10,
+                             getValues(r_all),
+                             NA))
+
+  
+r_rel_susc <- r_susc/r_all_newer;
+
+maps::map("world")
+plot(r_rel_susc, add= TRUE)
+
+sus.df<-data.frame(num.sp=getValues(r_susc),num.obs=getValues(r_susc_count))
+ggplot(sus.df,aes(x=num.obs,y=num.sp))+geom_point()
+
+r_rel_susc_high <- r_rel_susc > 0.2 #half of the corals of considered site are highly susceptible corals!
+pts_high_susc <- data.frame(rasterToPoints(r_rel_susc,fun=function(x){x>0.2}))
+
+world<-ne_countries(scale="medium",returnclass="sf")
+ggplot(data=world)+geom_sf()+geom_point(data=pts_high_susc,aes(x=x,y=y,color=layer))+scale_colour_gradientn(colours = c("#FFCCCC", "#FF9999","#FF6666","#CC3333", "#990000", "#660000"))
+
+```
+
+```{r}
+relativate <- function(raster_trait, raster_sp_count) {
+  rel_trait <- integer();
   r_rel <- raster();
-  for (i in 1:ncol(raster_resilience)){
-   for (j in 1:nrow(raster_resilience)) {
-     rel_resil <- round(raster_resilience$layer/raster_abundance$layer)
-     r_rel[i,j] <- rel_resil
+  for (i in 1:ncol(raster_trait)){
+   for (j in 1:nrow(raster_trait)) {
+     rel_trait <- round(raster_trait$layer/raster_sp_count$layer)
+     r_rel[i,j] <- rel_trait
    }
   }
   return(r_rel)
