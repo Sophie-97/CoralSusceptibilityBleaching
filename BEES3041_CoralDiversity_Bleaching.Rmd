@@ -19,20 +19,24 @@ Specifically, "Actiniaria", "Penicillaria" and "Spirularia" are sea anemones, "P
 The data from the above named orders is downloaded indivdially from gbif.org and saved on to the computer.
 
 ```{r Load libraries}
-library(data.table)
+library(data.table) # needed for fread
 library(sf)
 library(fasterize)
-library(dplyr)
+library(dplyr) # included in tidyverse???
 library(maps)
 library(maptools)
 library(sp)
 library(raster)
-library(leaflet) # not sure if needed -> colorbar?
 library(CoordinateCleaner)
 library(rnaturalearth)
 library(tidyverse)
-library(ncdf4)
-library(ggplot2)
+library(ggplot2) # included in tidyverse????
+library(viridis) # nice color set
+library(plotly) # stacked barplot
+library(RColorBrewer)
+library(purrr) # map over a function
+library(magick) # necessary for animation and reading pngs
+library(ggmap) # mapping with ggplot
 ```
 
 The data that has been successfully saved on to the computer (in form of .csv files) is now loaded into r studio.
@@ -55,9 +59,9 @@ coral_data <- load_data(coral_list)
 
 ```
 
-In the different datasets, some records do not contain the coordinates whilst others lack the identification to species level. Since those records that lack the information about species ID and location are meaningless for the purpose of this project, this next step involves the removal of N.A.s in coordinates ("decimalLongitude" & "decimalLatitude") and "speciesKey".
+In the different datasets, some records are incomplete; i.e. missing values in either coordinates or species name. This step therefore consists in the removal of N.A.s in coordinates ("decimalLongitude" & "decimalLatitude") and "speciesKey".
 
-Note: if longitude is missing, latitude is missing as well. Hence, no need to check for N.A.s in decimalLatitude
+Note: if longitude is missing, latitude is missing as well. Hence, no need to check for N.A.s in decimalLatitude. Similarly, if "speciesKey" is not indicated, the species name is not known either.
 
 ```{r Data cleaning}
  
@@ -66,7 +70,25 @@ Note: if longitude is missing, latitude is missing as well. Hence, no need to ch
      list();
    } 
 
-cleaned_list <- lapply(coral_data,FUN=clean_data)
+filtered_list <- lapply(coral_data,FUN=clean_data)
+
+```
+
+The coorindate records can sometimes be very inaccurate/misleading to the extent that the indicated coordinates for a coral species correspond to a location on land. Given that this project exclusively focuses on marine coral species, all the records with "land" coordinates will be removed via the "clean_coordinates" function.
+
+```{r Cleaning - Part 2} 
+
+sea_coords <- function(df){
+  coords_land <- clean_coordinates(df, lon = "decimalLongitude", lat = "decimalLatitude", species = "species", tests = c("seas"), value="spatialvalid")
+  filter(coords_land,.sea==FALSE) %>%
+   select(species,decimalLongitude,decimalLatitude)
+}
+
+cleaned_list<-list()
+for(i in 1:length(filtered_list)){
+  cleaned_list[[i]]<-sea_coords(data.frame(filtered_list[[i]]))
+}
+
 ```
 
 Dataframes are often more easy to handle compared to lists. Therefore, the following function transforms lists into one big dataframe.
@@ -81,49 +103,66 @@ list_to_df <- function(data_list) {
 }
 ```
 
-Plots of diversity hotspots per order, i.e. species richness for the different orders
+To get an overview of the distribution and to identify potential diversity hotspots of the different orders, the next step consists in the generation of global species richness plots for each respective order.
 
 ```{r Raster & Mapping}
 
-cleaned_df <- list_to_df(cleaned_list);
-
-sea_coords <- function(df){
-  coords_land <- clean_coordinates(df, lon = "decimalLongitude", lat = "decimalLatitude", species = "species", tests = c("seas"), value="spatialvalid")
-  #df_compared <- ((df$decimalLongitude %in% coords_land$decimalLongitude) & (df$decimalLatitude%in% coords_land$decimalLatitude) & (df$species %in% coords_land$species))
-  #ggplot(coords_land,aes(x=decimalLongitude,y=decimalLatitude,col=.sea))+geom_point()
-  new_coordinates<-filter(coords_land,.sea==FALSE)
-  
-  filter(cleaned_df, !df_compared) %>%
-    select(species,decimalLongitude,decimalLatitude)
-}
-
-cleaned_coordinates <- sea_coords(cleaned_df);
-
-super_cleaned_list<-list()
-for(i in 1:length(cleaned_list)){
-  super_cleaned_list[[i]]<-sea_coords(data.frame(cleaned_list[[i]]))
-}
+filtered_df <- list_to_df(filtered_list); # might not need this!!!
+cleaned_coordinates <- sea_coords(filtered_df); # do I really need this????
 
 
 map_coral <- function(list_clean){
   for (l in 1:length(list_clean)) {
     corpoints <- st_as_sf(data.frame(list_clean[[l]]), coords = c(x="decimalLongitude", y="decimalLatitude"))
-     r <- raster(corpoints, res = 0.8)
-     r <- rasterize(corpoints, r, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
-      #pdf(paste0(l,".pdf"))
-     #as_mapper(c("world"))
+     r <- raster(corpoints, res = 1.5)
+     r <- rasterize(corpoints, r, field = "species", fun= function(x, ...) {length(unique(na.omit(x)))})
+     pdf(paste0(l,".pdf"))
      maps::map("world")
-     plot(r,add=TRUE)  # adds the worldmap to the raster on the same plot , add= TRUE
-     #dev.off()
+     plot(r, col = plasma(15), add=TRUE)  # adds the raster to the plot of the worldmap ##### breaks=cuts,
+     dev.off()
    }
 }
 
-map_coral(super_cleaned_list);
+map_coral(cleaned_list);
+
+```
+
+The above code generates a map of global diversity richness for each order. Given the huge amount of data, the information displayed on these maps may appear a little overwhelming, and allow for little comparison between the orders. Therefore, a new map representing only the true hotspots of each respective order will be created.
+
+```{r}
+
+hotspots_order_list <- function(list_clean){
+  list_hotspot <- list();
+  
+  for (l in 1:length(list_clean)){
+     corpoints <- st_as_sf(data.frame(cleaned_list[[l]]), coords = c(x="decimalLongitude", y="decimalLatitude"))
+     r <- raster(corpoints, res = 1.5)
+     r <- rasterize(corpoints, r, field = "species", fun= function(x, ...) {length(unique(na.omit(x)))})
+     hotspots <- data.frame(rasterToPoints(r, fun= function(x){x> 0.75*maxValue(r)}), Ordernumber=l)
+     hotspots$percentage<-hotspots$layer*100/max(hotspots$layer,na.rm=TRUE)
+     list_hotspot[[l]] <- hotspots
+  }
+  return(list_hotspot);
+}
+
+hotspot_list <- hotspots_order_list(cleaned_list);
+
+df<-bind_rows(hotspot_list)
+
+coral_names<-data.frame(Ordernumber=1:5,names=c("Alcyonacea","Corallimorpharia","Helioporacea","Scleractinia","Zoantharia"))
+
+df<-left_join(df,coral_names)
+
+df$Ordernumber<-as.character(df$Ordernumber)
+
+world<-ne_countries(scale="medium",returnclass="sf")
+div_col <- plasma(15)
+ggplot(data=world)+geom_sf()+geom_point(data= df, aes(x=x,y=y,color=percentage,shape=names), size = 2) +scale_colour_gradientn(colours = div_col[1:12]) + xlab("Longitude (°)") + ylab("Latitude (°)") + ylim(-50,60) + xlim(-170,170) + labs(title = "Species richness hotspots per order") + theme(plot.title = element_text(hjust = 0.5), axis.text = element_text(size=12), legend.text = element_text(size=8), legend.key.size = unit(0.4, "cm"))
 
 
 ```
 
-Mapping hotspots of all orders on one map
+Coral reefs are complex systems that constitute an interspecific coral community that extends throughout different orders. Therefore, the next step aims to visualize the overal coral diversity hotspots of all orders combined on one map.
 
 ```{r Hotspot map of all coral species}
 
@@ -138,23 +177,27 @@ combine_all_coords <- function(list_all_orders) {
 }
 
 coords_all_sp <- list();
-coords_all_sp <- combine_all_coords(super_cleaned_list);
+coords_all_sp <- combine_all_coords(cleaned_list);
 
 df_all_coords <- coords_all_sp[[1]]
 df_all_coords <- do.call('rbind',coords_all_sp);
 
-
-r_all <- raster(coords_all_sp[[1]], res= 1.5)
-r_all <- rasterize(df_all_coords, r_all, field = "species", fun= function(x, ...) {length(unique(na.omit(x)))})
+r_all_sp <- raster(coords_all_sp[[1]], res= 1.5)
+r_all_sp <- rasterize(df_all_coords, r_all_sp, field = "species", fun= function(x, ...) {length(unique(na.omit(x)))})
 maps::map("world")
-plot(r_all,add=TRUE)
+plot(r_all_sp, col = plasma(15), add=TRUE)
 
-r2<-r_all>100
-pts<-data.frame(rasterToPoints(r_all,fun=function(x){x>100}))
+```
+
+To highlight the coral diversity hotspots, let's only consider the regions that contain more than 200 species.
+
+```{r}
+
+hotspots_all_sp <-data.frame(rasterToPoints(r_all_sp,fun=function(x){x>200}))
 
 world<-ne_countries(scale="medium",returnclass="sf")
-ggplot(data=world)+geom_sf()+geom_point(data=pts,aes(x=x,y=y,color=layer))+scale_colour_gradientn(colours = c("#FFCCCC", "#FF9999","#FF6666","#CC3333", "#990000", "#660000"))
-
+div_col <- plasma(15)
+ggplot(data=world)+geom_sf()+geom_point(data= hotspots_all_sp, aes(x=x,y=y,color=layer)) +scale_colour_gradientn(colours = div_col[1:12]) + xlab("Longitude (°)") + ylab("Latitude (°)") + ylim(-50,60) + xlim(-170,170) + labs(title = "Species richness hotspots of the world") + theme(plot.title = element_text(hjust = 0.5), axis.text = element_text(size=12))
 ```
 
 Coral bleaching susceptibility vs resistance
@@ -162,7 +205,9 @@ Coral bleaching susceptibility vs resistance
 Different species of corals have different levels of tolerance with respect to fluctuating temperatures. Swain et al. (2016) have defined and standardized this variability in the form of a "Bleaching Response Index" (BRI). In total, they have defined BRIs for 
 
 The data has been downloaded from the supplementary material provided by Swain et al. (2016). 
+
 ```{r BRI data}
+
 BRI_data <- fread("BRI_taxon_Swain2016.csv", select = c("Taxon", "Taxon-BRI (Bleaching Response Index) (%)", "Number of records", "Std Deviation"))
 
 BRI_data$`Taxon-BRI (Bleaching Response Index) (%)`<-as.numeric(gsub(",",".",BRI_data$`Taxon-BRI (Bleaching Response Index) (%)`))
@@ -203,49 +248,33 @@ Function that finds susceptible/resistant species in GBIF data set.
 
 ```{r}
 
-# GBIF_susc <- filter(cleaned_df,cleaned_df$species %in% susceptible_corals$Taxon);
-# GBIF_res <- filter(cleaned_df,cleaned_df$species %in% resistant_corals$Taxon);
 GBIF_susc <- filter(df_all_coords, df_all_coords$species %in% susceptible_corals$Taxon);
 GBIF_res <- filter(df_all_coords, df_all_coords$species %in% resistant_corals$Taxon);
 
-# Susceptible species
+```
 
-# world_map <- map_data("world")
-# ggplot(world_map, aes(x = long, y = lat, group = group)) +
-#   geom_polygon(fill="lightgray", colour = "white") + geom_point(data = GBIF_susc, aes(x= GBIF_susc$decimalLongitude, y= GBIF_susc$decimalLatitude, group = NULL))
-# 
-# r_susc<- raster(GBIF_susc, res= 1.5)
-# r_susc<- rasterize(GBIF_susc, r_susc, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
-# 
-# pts_susc<-data.frame(rasterToPoints(r_susc,fun=function(x){x==28887}))
-# 
-# world<-ne_countries(scale="medium",returnclass="sf")
-# ggplot(data=world)+geom_sf()+geom_point(data=pts_susc,aes(x=x,y=y,color="blue"))
+Mapping interspecific susceptibility
 
-### Plot of coral susceptibility
-#extent(r_all) <- extent(r_susc); # needed to get same resolution!!
-r_susc <- r_all
+```{r}
+
+r_susc <- r_all_sp
 reset_vector <- integer(length(ncell(r_susc)));
 r_susc <- setValues(r_susc,reset_vector);
 r_susc <- rasterize(GBIF_susc, r_susc, field = "species", fun= function(x, ...) {length(unique(na.omit(x)))})
 
-r_susc_count <- rasterize(GBIF_susc, r_susc, field = "species", fun= function(x, ...) {length(na.omit(x))})
-
-
 pts_susc<-data.frame(rasterToPoints(r_susc,fun=function(x){x>10}))
-r2<-r_all>100
 world<-ne_countries(scale="medium",returnclass="sf")
-ggplot(data=world)+geom_sf()+geom_point(data=pts_susc,aes(x=x,y=y,color=layer))+scale_colour_gradientn(colours = c("#FFCCCC", "#FF9999","#FF6666","#CC3333", "#990000", "#660000"))
-
+ggplot(data=world)+geom_sf()+geom_point(data=pts_susc,aes(x=x,y=y,color=layer))+scale_colour_gradientn(colours = c("#FFCCCC", "#FF9999","#FF6666","#CC3333", "#990000", "#660000")) + xlab("Longitude (°)") + ylab("Latitude (°)") + ylim(-50,60) + labs(title = "Interspecific susceptibility hotspots of the world") + theme(plot.title = element_text(hjust = 0.5)) 
 ```
-Plot RELATIVE coral susceptibility
+
+Coral susceptibility with respect to species richness (i.e. coral diversity)
 
 ```{r}
-r_all_new<-r_all>10
-r_all_newer<-r_all*r_all_new
+r_all_new<-r_all_sp>10
+r_all_newer<-r_all_sp*r_all_new
 
-r_all_newer<-setValues(r_all_newer,ifelse(getValues(r_all)>10,
-                             getValues(r_all),
+r_all_newer<-setValues(r_all_newer,ifelse(getValues(r_all_sp)>10,
+                             getValues(r_all_sp),
                              NA))
 
   
@@ -254,59 +283,126 @@ r_rel_susc <- r_susc/r_all_newer;
 maps::map("world")
 plot(r_rel_susc, add= TRUE)
 
-sus.df<-data.frame(num.sp=getValues(r_susc),num.obs=getValues(r_susc_count))
+sus.df<-data.frame(num.sp=getValues(r_susc),num.obs=getValues(r_susc))
 ggplot(sus.df,aes(x=num.obs,y=num.sp))+geom_point()
 
-r_rel_susc_high <- r_rel_susc > 0.2 #half of the corals of considered site are highly susceptible corals!
+r_rel_susc_high <- r_rel_susc > 0.2  
 pts_high_susc <- data.frame(rasterToPoints(r_rel_susc,fun=function(x){x>0.2}))
 
 world<-ne_countries(scale="medium",returnclass="sf")
-ggplot(data=world)+geom_sf()+geom_point(data=pts_high_susc,aes(x=x,y=y,color=layer))+scale_colour_gradientn(colours = c("#FFCCCC", "#FF9999","#FF6666","#CC3333", "#990000", "#660000"))
+ggplot(data=world)+geom_sf()+geom_point(data=pts_high_susc,aes(x=x,y=y,color=layer))+scale_colour_gradientn(colours = c("#FFCCCC", "#FF9999","#FF6666","#CC3333", "#990000", "#660000")) + xlab("Longitude (°)") + ylab("Latitude (°)") + ylim(-50,60) + labs(title = "Interspecific susceptibility hotspots of the world with respect to coral diversity") + theme(plot.title = element_text(hjust = 0.5))
+
+```
+Mapping interspecific resistance
+
+```{r}
+r_res <- r_all_sp
+reset_vector_res <- integer(length(ncell(r_res)));
+r_res <- setValues(r_res,reset_vector_res);
+r_res <- rasterize(GBIF_res, r_res, field = "species", fun= function(x, ...) {length(unique(na.omit(x)))})
+
+pts_res<-data.frame(rasterToPoints(r_res,fun=function(x){x>3}))
+world<-ne_countries(scale="medium",returnclass="sf")
+col_res <- brewer.pal(8,"Blues")
+ggplot(data=world)+geom_sf()+geom_point(data=pts_res,aes(x=x,y=y,color=layer))+scale_colour_gradientn(colours = col_res[4:8]) + xlab("Longitude (°)") + ylab("Latitude (°)") + ylim(-50,60) + labs(title = "Interspecific resistance 'hotspots' of the world") + theme(plot.title = element_text(hjust = 0.5)) 
+```
+
+Interspecific resistance with respect to coral diversity
+
+```{r}
+
+r_rel_res <- r_res/r_all_newer;
+
+maps::map("world")
+plot(r_rel_res, add= TRUE)
+
+res.df<-data.frame(num.sp=getValues(r_res),num.obs=getValues(r_res))
+ggplot(res.df,aes(x=num.obs,y=num.sp))+geom_point()
+
+pts_high_res <- data.frame(rasterToPoints(r_rel_res,fun=function(x){x>0.2}))
+
+world<-ne_countries(scale="medium",returnclass="sf")
+ggplot(data=world)+geom_sf()+geom_point(data=pts_high_res,aes(x=x,y=y,color=layer))+scale_colour_gradientn(colours = col_res[4:8]) + xlab("Longitude (°)") + ylab("Latitude (°)") + ylim(-50,60) + labs(title = "Interspecific resistance hotspots of the world with respect to coral diversity") + theme(plot.title = element_text(hjust = 0.5))
 
 ```
 
+Susceptibility of respective orders
+
 ```{r}
-relativate <- function(raster_trait, raster_sp_count) {
-  rel_trait <- integer();
-  r_rel <- raster();
-  for (i in 1:ncol(raster_trait)){
-   for (j in 1:nrow(raster_trait)) {
-     rel_trait <- round(raster_trait$layer/raster_sp_count$layer)
-     r_rel[i,j] <- rel_trait
-   }
-  }
-  return(r_rel)
+
+# Count of number of species in the different orders
+species_in_Alcyonacea <- unique.data.frame(data.frame(cleaned_list[[1]]$species));
+species_in_Corallimorpharia <- unique.data.frame(data.frame(cleaned_list[[2]]$species));
+species_in_Helioporacea <- unique.data.frame(data.frame(cleaned_list[[3]]$species));
+species_in_Scleractinia <- unique.data.frame(data.frame(cleaned_list[[4]]$species));
+species_in_Zoantharia <- unique.data.frame(data.frame(cleaned_list[[5]]$species));
+
+susc_Alcy <- filter(species_in_Alcyonacea, species_in_Alcyonacea[[1]] %in% susceptible_corals$Taxon);
+susc_Scler <- filter(species_in_Scleractinia, species_in_Scleractinia[[1]] %in% susceptible_corals$Taxon);
+res_Alcy <- filter(species_in_Alcyonacea, species_in_Alcyonacea[[1]] %in% resistant_corals$Taxon);
+res_Scler <- filter(species_in_Scleractinia, species_in_Scleractinia[[1]] %in% resistant_corals$Taxon);
+
+res_Cor <- filter(species_in_Corallimorpharia, species_in_Corallimorpharia[[1]] %in% resistant_corals$Taxon);
+res_Helio <- filter(species_in_Helioporacea, species_in_Helioporacea[[1]] %in% resistant_corals$Taxon);
+
+```
+
+Bleaching sites data from Donner et al. (2017): Worldwide recorded coral bleaching from 1963-2011
+
+```{r}
+Bleaching_data <- fread("Data_Donner_2017.csv", select = c("LATITUDE", "LONGITUDE", "YEAR", "SEVERITY_CODE"))
+clean_bleaching_data <- filter(Bleaching_data, (Bleaching_data$SEVERITY_CODE == "2" | Bleaching_data$SEVERITY_CODE == "3"))
+clean_bleaching_data$LATITUDE <- as.numeric(gsub(",",".", clean_bleaching_data$LATITUDE))
+clean_bleaching_data$LONGITUDE <- as.numeric(gsub(",",".", clean_bleaching_data$LONGITUDE))
+
+```
+
+Animation of bleached sites from 1973 to 2011
+
+```{r}
+world <- ne_countries(scale="medium",returnclass="sf")
+
+#rasterToPoints(r_susc,fun=function(x){x>10}))
+
+bleach_map <- function(year){
+  
+    ggplot(data=world) + geom_sf() + geom_point(data= clean_bleaching_data[clean_bleaching_data$YEAR == year,],
+                        aes(x=LONGITUDE, y=LATITUDE, color = SEVERITY_CODE)) +
+                        theme_bw() + ylab("Latitude") + xlab("Longitude") + xlim(-180,180) + ylim(-90,90)
+    print(paste0("saving plot ", year))
+    ggsave(filename = paste0("bleach_events_in_",year,".png"), width = length(xlim), height = length(ylim))
 }
 
-relative_susc <- relativate(r_susc, r_all);
 
-r_rel_susc <- merge(r_all, r_susc, tolerance= 1.0, overlap= TRUE)
-pts_rel_susc <- data.frame(rasterToPoints(r_rel_susc,fun=function(x){x>100}))
+seq(from = 1973, to=2011, by=1) %>% 
+  map_df(bleach_map)
 
-world<-ne_countries(scale="medium",returnclass="sf")
-ggplot(data=world)+geom_sf()+geom_point(data=pts_rel_susc,aes(x=x,y=y,color=layer))+scale_colour_gradientn(colours = c("#FFCCCC", "#FF9999","#FF6666","#CC3333", "#990000", "#660000"))
+list.files(path = "bleach_events_in", pattern = "*.png") %>%
+  map(image_read) %>% # reads each path file
+  image_join() %>% # joins image
+  image_animate(fps=2) %>% # animates 2 frames per second
+  image_write("bleaching_events.gif") # write to current dir
+```
 
-r_tot_div <- raster(df_all_coords, res = 1.0)
-r_tot_div <- rasterize(df_all_coords, r_tot_div, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
-plot(r_tot_div)
+Bleach-susceptible regions in the period from 1973 to 2011
+
+```{r}
+
+cor_bleach <- st_as_sf(clean_bleaching_data, coords = c(x="LONGITUDE", y="LATITUDE"))
+r_bleach <- raster(cor_bleach, res = 1.5)
+#r_bleach <- rasterize(cor_bleach, r_bleach)
+r_bleach <- rasterize(cor_bleach, r_res, field = "YEAR", fun= function(x, ...) {length(na.omit(x))})
+maps::map("world")
+plot(r_res, add=TRUE)
 
 ```
 
-xy
-```{r}
-plot(r_tot_div > 200)
-plot(r_susc > 25)
-```
-```{r}
-cor_div <- raster(coords_all_sp[[1]], res= 1.5)
-cor_div <- rasterize(df_all_coords, cor_div, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
-pts_cor_div <-data.frame(rasterToPoints(cor_div,fun=function(x){x>300}))
+Hotspots of bleaching events from 1973-2011
 
-r_high_susc <- raster(GBIF_susc[1], res= 1.5)
-r_high_susc <- rasterize(GBIF_susc, r_high_susc, field = "speciesKey", fun= function(x, ...) {length(unique(na.omit(x)))})
-pts_high_susc<-data.frame(rasterToPoints(r_high_susc,fun=function(x){x>25}))
-
+```{r}
+pts_bleach<-data.frame(rasterToPoints(r_bleach,fun=function(x){x>10}))
 world<-ne_countries(scale="medium",returnclass="sf")
-ggplot(data=world)+geom_sf()+geom_point(data=pts_cor_div,aes(x=x,y=y,color=layer))+scale_colour_gradientn(colours = c("#FFCCCC", "#FF9999","#FF6666","#CC3333", "#990000", "#660000")) + geom_point(data= pts_high_susc, aes(x=x,y=y, color=layer))
+col_res <- brewer.pal(8,"Greys")
+ggplot(data=world)+geom_sf()+geom_point(data=pts_bleach,aes(x=x,y=y,colour = layer))+scale_colour_gradientn(colors = col_res[3:8]) + xlab("Longitude (°)") + ylab("Latitude (°)") + ylim(-50,60) + labs(title = "Bleaching hotspots worldwide from 1973 to 2011") + theme(plot.title = element_text(hjust = 0.5)) 
 ```
 
